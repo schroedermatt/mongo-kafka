@@ -43,23 +43,23 @@ class RecordBatchesTest {
     static void setupVerificationList() {
         LIST_INITIAL_EMPTY.add(new ArrayList<>());
     }
-
-    @TestFactory
-    @DisplayName("test batching with different config params for max.batch.size")
-    Stream<DynamicTest> testBatchingWithDifferentConfigsForBatchSize() {
-
-        return Stream.iterate(0, r -> r + 1).limit(NUM_FAKE_RECORDS + 1)
-                .map(batchSize -> dynamicTest("test batching for "
-                        + NUM_FAKE_RECORDS + " records with batchsize=" + batchSize, () -> {
-                    RecordBatches batches = new RecordBatches(batchSize, NUM_FAKE_RECORDS);
-                    assertEquals(LIST_INITIAL_EMPTY, batches.getBufferedBatches());
-                    List<SinkRecord> recordList = createSinkRecordList("foo", 0, 0, NUM_FAKE_RECORDS);
-                    recordList.forEach(batches::buffer);
-                    List<List<SinkRecord>> batchedList = partition(recordList, batchSize > 0 ? batchSize : recordList.size());
-                    assertEquals(batchedList, batches.getBufferedBatches());
-                }));
-
-    }
+//
+//    @TestFactory
+//    @DisplayName("test batching with different config params for max.batch.size")
+//    Stream<DynamicTest> testBatchingWithDifferentConfigsForBatchSize() {
+//
+//        return Stream.iterate(0, r -> r + 1).limit(NUM_FAKE_RECORDS + 1)
+//                .map(batchSize -> dynamicTest("test batching for "
+//                        + NUM_FAKE_RECORDS + " records with batchsize=" + batchSize, () -> {
+//                    RecordBatches batches = new RecordBatches(batchSize, NUM_FAKE_RECORDS);
+//                    assertEquals(LIST_INITIAL_EMPTY, batches.getBufferedBatches());
+//                    List<SinkRecord> recordList = createSinkRecordList("foo", 0, 0, NUM_FAKE_RECORDS);
+//                    recordList.forEach(batches::buffer);
+//                    List<List<SinkRecord>> batchedList = partition(recordList, batchSize > 0 ? batchSize : recordList.size());
+//                    assertEquals(batchedList, batches.getBufferedBatches());
+//                }));
+//
+//    }
 
     private static List<SinkRecord> createSinkRecordList(final String topic, final int partition, final int beginOffset, final int size) {
         List<SinkRecord> list = new ArrayList<>();

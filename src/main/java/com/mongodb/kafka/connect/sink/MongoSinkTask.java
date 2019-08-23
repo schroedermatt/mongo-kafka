@@ -18,7 +18,6 @@
 
 package com.mongodb.kafka.connect.sink;
 
-import static com.mongodb.kafka.connect.sink.MongoSinkTopicConfig.MAX_BATCH_SIZE_CONFIG;
 import static com.mongodb.kafka.connect.sink.MongoSinkTopicConfig.MAX_NUM_RETRIES_CONFIG;
 import static com.mongodb.kafka.connect.sink.MongoSinkTopicConfig.RETRIES_DEFER_TIMEOUT_CONFIG;
 import static com.mongodb.kafka.connect.util.ConfigHelper.getMongoDriverInformation;
@@ -34,11 +33,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import com.mongodb.MongoNamespace;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.errors.RetriableException;
+import org.apache.kafka.connect.header.Header;
 import org.apache.kafka.connect.sink.SinkRecord;
 import org.apache.kafka.connect.sink.SinkTask;
 import org.apache.kafka.connect.sink.SinkTaskContext;
@@ -110,22 +111,29 @@ public class MongoSinkTask extends SinkTask {
             LOGGER.debug("No sink records to process for current poll operation");
             return;
         }
-        Map<String, RecordBatches> batchMapping = createSinkRecordBatchesPerTopic(records);
-        batchMapping.forEach((topic, batches) -> {
-            MongoSinkTopicConfig topicConfig = sinkConfig.getMongoSinkTopicConfig(topic);
+
+        LOGGER.debug("Number of sink records to process: {}", records.size());
+
+        Map<MongoNamespace, RecordBatches> namespaceBatches = createSinkRecordBatchesPerNamespace(records);
+        namespaceBatches.forEach((namespace, batches) -> {
+            MongoSinkTopicConfig batchConfig = batches.getConfig();
             batches.getBufferedBatches().forEach(batch -> {
-                        processSinkRecords(topicConfig, batch);
-                        RateLimitSettings rls = topicConfig.getRateLimitSettings();
-                        if (rls.isTriggered()) {
-                            LOGGER.debug("Rate limit settings triggering {}ms defer timeout after processing {}"
-                                       + " further batches for topic {}", rls.getTimeoutMs(), rls.getEveryN(), topic);
-                            try {
-                                Thread.sleep(rls.getTimeoutMs());
-                            } catch (InterruptedException e) {
-                                LOGGER.error(e.getMessage());
-                            }
+                    processSinkRecords(batchConfig, namespace, batch);
+
+                    RateLimitSettings rls = batchConfig.getRateLimitSettings();
+                    if (rls.isTriggered()) {
+                        LOGGER.debug("Rate limit settings triggering {}ms defer timeout after processing {}"
+                            + " further batches for topic {}",
+                            rls.getTimeoutMs(),
+                            rls.getEveryN(),
+                            batches.getConfig().getTopic());
+                        try {
+                            Thread.sleep(rls.getTimeoutMs());
+                        } catch (InterruptedException e) {
+                            LOGGER.error(e.getMessage());
                         }
                     }
+                }
             );
         });
     }
@@ -164,16 +172,18 @@ public class MongoSinkTask extends SinkTask {
         return mongoClient;
     }
 
-    private void processSinkRecords(final MongoSinkTopicConfig config, final List<SinkRecord> batch) {
+    private void processSinkRecords(final MongoSinkTopicConfig config, final MongoNamespace namespace, final List<SinkRecord> batch) {
         List<? extends WriteModel<BsonDocument>> writeModels = config.getCdcHandler().isPresent()
                 ? buildWriteModelCDC(config, batch) : buildWriteModel(config, batch);
         try {
             if (!writeModels.isEmpty()) {
-                LOGGER.debug("Bulk writing {} document(s) into collection [{}]", writeModels.size(),
-                        config.getNamespace().getFullName());
+                LOGGER.debug("Bulk writing {} document(s) into collection [{}]",
+                    writeModels.size(),
+                    namespace.getFullName());
+
                 BulkWriteResult result = getMongoClient()
-                        .getDatabase(config.getNamespace().getDatabaseName())
-                        .getCollection(config.getNamespace().getCollectionName(), BsonDocument.class)
+                        .getDatabase(namespace.getDatabaseName())
+                        .getCollection(namespace.getCollectionName(), BsonDocument.class)
                         .bulkWrite(writeModels, BULK_WRITE_OPTIONS);
                 LOGGER.debug("Mongodb bulk write result: {}", result);
             }
@@ -182,41 +192,73 @@ public class MongoSinkTask extends SinkTask {
             LOGGER.error(e.getWriteResult().toString());
             LOGGER.error(e.getWriteErrors().toString());
             LOGGER.error(e.getWriteConcernError().toString());
-            checkRetriableException(config, e);
+            checkRetriableException(config.getTopic(), e, config.getInt(RETRIES_DEFER_TIMEOUT_CONFIG));
         } catch (MongoException e) {
             LOGGER.error("Error on mongodb operation", e);
             LOGGER.error("Writing {} document(s) into collection [{}] failed -> remaining retries ({})",
-                    writeModels.size(), config.getNamespace().getFullName(), remainingRetriesTopicMap.get(config.getTopic()).get());
-            checkRetriableException(config, e);
+                    writeModels.size(), namespace.getFullName(), remainingRetriesTopicMap.get(config.getTopic()).get());
+            checkRetriableException(config.getTopic(), e, config.getInt(RETRIES_DEFER_TIMEOUT_CONFIG));
         }
     }
 
-    private void checkRetriableException(final MongoSinkTopicConfig config, final MongoException e) {
-        if (remainingRetriesTopicMap.get(config.getTopic()).decrementAndGet() <= 0) {
+    private void checkRetriableException(final String key, final MongoException e, Integer deferRetryMs) {
+        if (remainingRetriesTopicMap.get(key).decrementAndGet() <= 0) {
             throw new DataException("Failed to write mongodb documents despite retrying", e);
         }
-        Integer deferRetryMs = config.getInt(RETRIES_DEFER_TIMEOUT_CONFIG);
         LOGGER.debug("Deferring retry operation for {}ms", deferRetryMs);
         context.timeout(deferRetryMs);
         throw new RetriableException(e.getMessage(), e);
     }
 
-    Map<String, RecordBatches> createSinkRecordBatchesPerTopic(final Collection<SinkRecord> records) {
-        LOGGER.debug("Number of sink records to process: {}", records.size());
+    Map<MongoNamespace, RecordBatches> createSinkRecordBatchesPerNamespace(Collection<SinkRecord> records) {
+        Map<MongoNamespace, RecordBatches> batchMapping = new HashMap<>();
 
-        Map<String, RecordBatches> batchMapping = new HashMap<>();
-        LOGGER.debug("Buffering sink records into grouped topic batches");
+        LOGGER.debug("Buffering sink records into batches for each Mongo namespace (database/collection)");
+
         records.forEach(r -> {
-            RecordBatches batches = batchMapping.get(r.topic());
+            MongoSinkTopicConfig config;
+            MongoNamespace namespace;
+
+            if (sinkConfig.inspectHeaders()) {
+                config = sinkConfig.getDefaultConfig();
+                String database = config.getDatabase();
+                String collection = config.getNamespace().getCollectionName();
+
+                // check headers for an overriding value for db and/or coll
+                boolean dbMatch = false;
+                boolean collMatch = false;
+                if (r.headers() != null) {
+                    for (Header header : r.headers()) {
+                        if (!dbMatch && sinkConfig.getDatabaseHeader().equals(header.key())) {
+                            database = header.value().toString();
+                            dbMatch = true;
+                        } else if (!collMatch && sinkConfig.getCollectionHeader().equals(header.key())) {
+                            collection = header.value().toString();
+                            collMatch = true;
+                        }
+
+                        // break early if db and coll headers have already been found
+                        if (dbMatch && collMatch) {
+                            break;
+                        }
+                    }
+                }
+
+                namespace = new MongoNamespace(database, collection);
+            } else {
+                config = sinkConfig.getMongoSinkTopicConfig(r.topic());
+                namespace = config.getNamespace();
+            }
+
+            RecordBatches batches = batchMapping.get(namespace);
             if (batches == null) {
-                int maxBatchSize = sinkConfig.getMongoSinkTopicConfig(r.topic()).getInt(MAX_BATCH_SIZE_CONFIG);
-                LOGGER.debug("Batch size for collection {} is at most {} record(s)",
-                        sinkConfig.getMongoSinkTopicConfig(r.topic()).getNamespace().getCollectionName(), maxBatchSize);
-                batches = new RecordBatches(maxBatchSize, records.size());
-                batchMapping.put(r.topic(), batches);
+                LOGGER.debug("Batch size for collection {} is at most {} record(s)", namespace.getCollectionName(), config.getMaxBatchSize());
+                batches = new RecordBatches(config, records.size());
+                batchMapping.put(namespace, batches);
             }
             batches.buffer(r);
         });
+
         return batchMapping;
     }
 

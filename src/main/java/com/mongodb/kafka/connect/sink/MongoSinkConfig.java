@@ -43,6 +43,9 @@ import com.mongodb.kafka.connect.util.Validators;
 
 public class MongoSinkConfig extends AbstractConfig {
 
+    // topic key used for a default MongoSinkTopicConfig
+    public static final String DEFAULT_TOPIC = "mongo.sink.default.config";
+
     public static final String TOPICS_CONFIG = MongoSinkConnector.TOPICS_CONFIG;
     private static final String TOPICS_DISPLAY = "The Kafka topics";
     private static final String TOPICS_DOC = "A list of kafka topics for the sink connector.";
@@ -63,6 +66,7 @@ public class MongoSinkConfig extends AbstractConfig {
 
     private Map<String, String> originals;
     private final List<String> topics;
+    private final MongoSinkTopicConfig defaultConfig;
     private Map<String, MongoSinkTopicConfig> topicSinkConnectorConfigMap;
     private ConnectionString connectionString;
 
@@ -72,7 +76,11 @@ public class MongoSinkConfig extends AbstractConfig {
         topics = unmodifiableList(getList(TOPICS_CONFIG));
         connectionString = new ConnectionString(getString(CONNECTION_URI_CONFIG));
 
-        topics.forEach(this::getMongoSinkTopicConfig);
+        // eager load all topic configs
+        createMongoSinkTopicConfig();
+
+        // load a default config set (used when inspecting headers to determine namespace)
+        defaultConfig = new MongoSinkTopicConfig(DEFAULT_TOPIC, originals);
     }
 
     public static final ConfigDef CONFIG = createConfigDef();
@@ -100,6 +108,22 @@ public class MongoSinkConfig extends AbstractConfig {
             createMongoSinkTopicConfig();
         }
         return topicSinkConnectorConfigMap.get(topic);
+    }
+
+    MongoSinkTopicConfig getDefaultConfig() {
+      return this.defaultConfig;
+    }
+
+    boolean inspectHeaders() {
+        return !getDatabaseHeader().isEmpty() || !getCollectionHeader().isEmpty();
+    }
+
+    String getDatabaseHeader() {
+        return getString(MongoSinkTopicConfig.DATABASE_HEADER_CONFIG);
+    }
+
+    String getCollectionHeader() {
+        return getString(MongoSinkTopicConfig.COLLECTION_HEADER_CONFIG);
     }
 
     private void createMongoSinkTopicConfig() {

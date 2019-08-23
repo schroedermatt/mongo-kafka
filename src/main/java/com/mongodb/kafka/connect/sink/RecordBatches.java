@@ -25,12 +25,14 @@ import org.apache.kafka.connect.sink.SinkRecord;
 
 class RecordBatches {
 
+    private final MongoSinkTopicConfig config;
     private int batchSize;
     private int currentBatch = 0;
     private List<List<SinkRecord>> bufferedBatches = new ArrayList<>();
 
-    RecordBatches(final int batchSize, final int records) {
-        this.batchSize = batchSize;
+    RecordBatches(final MongoSinkTopicConfig config, final int records) {
+        this.config = config;
+        this.batchSize = config.getMaxBatchSize();
         bufferedBatches.add(batchSize > 0 ? new ArrayList<>(batchSize) : new ArrayList<>(records));
     }
 
@@ -51,4 +53,7 @@ class RecordBatches {
         return bufferedBatches;
     }
 
+    MongoSinkTopicConfig getConfig() {
+        return this.config;
+    }
 }

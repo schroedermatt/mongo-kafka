@@ -21,6 +21,7 @@ import static org.apache.kafka.connect.runtime.SinkConnectorConfig.TOPICS_CONFIG
 import java.util.HashMap;
 import java.util.Map;
 
+import com.mongodb.MongoNamespace;
 import org.bson.Document;
 
 public final class SinkTestHelper {
@@ -29,6 +30,7 @@ public final class SinkTestHelper {
     public static final String CLIENT_URI_AUTH_SETTINGS = "mongodb://user:pass@localhost:27017/kafkaconnect";
     public static final String TEST_TOPIC = "topic";
     public static final String TEST_DATABASE = "myDB";
+    public static final MongoNamespace TEST_NAMESPACE = new MongoNamespace(TEST_DATABASE, TEST_TOPIC);
 
     public static Map<String, String> createConfigMap() {
         Map<String, String> map = new HashMap<>();

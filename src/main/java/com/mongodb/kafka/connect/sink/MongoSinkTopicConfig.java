@@ -77,11 +77,21 @@ public class MongoSinkTopicConfig extends AbstractConfig {
     private static final String DATABASE_DISPLAY = "The MongoDB database name.";
     private static final String DATABASE_DOC = "The database for the sink to write.";
 
+    public static final String DATABASE_HEADER_CONFIG = "database.header";
+    private static final String DATABASE_HEADER_DISPLAY = "Mongo Database Kafka Header";
+    private static final String DATABASE_HEADER_DOC = "When configured, the connector will retrieve this header on each incoming Kafka record to determine which Mongo database it should be sent to. If the header does not exist, the connector will fall back to the provided topic overrides or the base database configuration.";
+    private static final Object DATABASE_HEADER_DEFAULT = "";
+
     public static final String COLLECTION_CONFIG = "collection";
     private static final String COLLECTION_DISPLAY = "The default MongoDB collection name";
     private static final String COLLECTION_DOC = "Optional, single sink collection name to write to. If following multiple topics then "
             + "this will be the default collection they are mapped to.";
     private static final String COLLECTION_DEFAULT = "";
+
+    public static final String COLLECTION_HEADER_CONFIG = "collection.header";
+    private static final String COLLECTION_HEADER_DISPLAY = "Mongo Collection Kafka Header";
+    private static final String COLLECTION_HEADER_DOC = "When configured, the connector will retrieve this header on each incoming Kafka record to determine which Mongo collection it should be sent to. If the header does not exist, the connector will fall back to the provided topic overrides or the base collection configuration.";
+    private static final Object COLLECTION_HEADER_DEFAULT = "";
 
     public static final String MAX_NUM_RETRIES_CONFIG = "max.num.retries";
     private static final String MAX_NUM_RETRIES_DISPLAY = "Max number of retries";
@@ -213,11 +223,11 @@ public class MongoSinkTopicConfig extends AbstractConfig {
 
     MongoNamespace getNamespace() {
         if (namespace == null) {
-            String database = getString(DATABASE_CONFIG);
+            String database = getDatabase();
             if (database.isEmpty()) {
                 throw new ConnectConfigException(DATABASE_CONFIG, database, "Missing database name for configuration.");
             }
-            String collection = getString(COLLECTION_CONFIG);
+            String collection = getCollection();
             if (collection.isEmpty()) {
                 collection = topic;
             }
@@ -304,6 +314,18 @@ public class MongoSinkTopicConfig extends AbstractConfig {
             rateLimitSettings = new RateLimitSettings(getInt(RATE_LIMITING_TIMEOUT_CONFIG), getInt(RATE_LIMITING_EVERY_N_CONFIG));
         }
         return rateLimitSettings;
+    }
+
+    int getMaxBatchSize() {
+        return getInt(MAX_BATCH_SIZE_CONFIG);
+    }
+
+    String getDatabase() {
+        return getString(DATABASE_CONFIG);
+    }
+
+    String getCollection() {
+        return getString(COLLECTION_CONFIG);
     }
 
     static Map<String, ConfigValue> validateAll(final String topic, final Map<String, String> props) {
@@ -401,6 +423,15 @@ public class MongoSinkTopicConfig extends AbstractConfig {
                 ++orderInGroup,
                 ConfigDef.Width.MEDIUM,
                 DATABASE_DISPLAY);
+        configDef.define(DATABASE_HEADER_CONFIG,
+                ConfigDef.Type.STRING,
+                DATABASE_HEADER_DEFAULT,
+                ConfigDef.Importance.MEDIUM,
+                DATABASE_HEADER_DOC,
+                group,
+                ++orderInGroup,
+                ConfigDef.Width.MEDIUM,
+                DATABASE_HEADER_DISPLAY);
         configDef.define(COLLECTION_CONFIG,
                 ConfigDef.Type.STRING,
                 COLLECTION_DEFAULT,
@@ -410,6 +441,15 @@ public class MongoSinkTopicConfig extends AbstractConfig {
                 ++orderInGroup,
                 ConfigDef.Width.MEDIUM,
                 COLLECTION_DISPLAY);
+        configDef.define(COLLECTION_HEADER_CONFIG,
+            ConfigDef.Type.STRING,
+            COLLECTION_HEADER_DEFAULT,
+            ConfigDef.Importance.MEDIUM,
+            COLLECTION_HEADER_DOC,
+            group,
+            ++orderInGroup,
+            ConfigDef.Width.MEDIUM,
+            COLLECTION_HEADER_DISPLAY);
 
         group = "Writes";
         orderInGroup = 0;
