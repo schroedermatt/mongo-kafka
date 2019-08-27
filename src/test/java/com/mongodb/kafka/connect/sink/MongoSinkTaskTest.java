@@ -25,7 +25,11 @@ import static com.mongodb.kafka.connect.sink.MongoSinkTopicConfig.DELETE_ON_NULL
 import static com.mongodb.kafka.connect.sink.MongoSinkTopicConfig.DOCUMENT_ID_STRATEGY_CONFIG;
 import static com.mongodb.kafka.connect.sink.MongoSinkTopicConfig.MAX_BATCH_SIZE_CONFIG;
 import static com.mongodb.kafka.connect.sink.MongoSinkTopicConfig.WRITEMODEL_STRATEGY_CONFIG;
-import static com.mongodb.kafka.connect.sink.SinkTestHelper.*;
+import static com.mongodb.kafka.connect.sink.SinkTestHelper.TEST_DATABASE;
+import static com.mongodb.kafka.connect.sink.SinkTestHelper.TEST_NAMESPACE;
+import static com.mongodb.kafka.connect.sink.SinkTestHelper.TEST_TOPIC;
+import static com.mongodb.kafka.connect.sink.SinkTestHelper.createConfigMap;
+import static com.mongodb.kafka.connect.sink.SinkTestHelper.createTopicConfig;
 import static java.lang.String.format;
 import static java.util.Arrays.asList;
 import static java.util.Collections.emptyList;
@@ -46,7 +50,6 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
-import com.mongodb.MongoNamespace;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
@@ -61,6 +64,7 @@ import org.junit.runner.RunWith;
 
 import org.bson.BsonDocument;
 
+import com.mongodb.MongoNamespace;
 import com.mongodb.client.model.DeleteOneModel;
 import com.mongodb.client.model.ReplaceOneModel;
 import com.mongodb.client.model.WriteModel;
@@ -163,7 +167,8 @@ class MongoSinkTaskTest {
             assertAll("asserting created batches for equality" + namespace,
                     Stream.iterate(0, b -> b + 1).limit(batches.getBufferedBatches().size()).map(b -> (Executable) () ->
                             assertEquals(ts.expectedBatching.get(b), batches.getBufferedBatches().get(b),
-                                    "records mismatch in batch " + b + " for map entry " + namespace.getFullName())).collect(Collectors.toList())
+                                    "records mismatch in batch " + b + " for map entry "
+                                        + namespace.getFullName())).collect(Collectors.toList())
             );
         })));
         return tests;

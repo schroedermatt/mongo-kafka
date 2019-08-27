@@ -19,11 +19,15 @@
 package com.mongodb.kafka.connect.sink;
 
 import static avro.shaded.com.google.common.collect.Lists.partition;
-import static org.junit.Assert.assertEquals;
+import static com.mongodb.kafka.connect.sink.MongoSinkTopicConfig.DATABASE_CONFIG;
+import static com.mongodb.kafka.connect.sink.MongoSinkTopicConfig.MAX_BATCH_SIZE_CONFIG;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.DynamicTest.dynamicTest;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 import org.apache.kafka.connect.sink.SinkRecord;
@@ -43,23 +47,29 @@ class RecordBatchesTest {
     static void setupVerificationList() {
         LIST_INITIAL_EMPTY.add(new ArrayList<>());
     }
-//
-//    @TestFactory
-//    @DisplayName("test batching with different config params for max.batch.size")
-//    Stream<DynamicTest> testBatchingWithDifferentConfigsForBatchSize() {
-//
-//        return Stream.iterate(0, r -> r + 1).limit(NUM_FAKE_RECORDS + 1)
-//                .map(batchSize -> dynamicTest("test batching for "
-//                        + NUM_FAKE_RECORDS + " records with batchsize=" + batchSize, () -> {
-//                    RecordBatches batches = new RecordBatches(batchSize, NUM_FAKE_RECORDS);
-//                    assertEquals(LIST_INITIAL_EMPTY, batches.getBufferedBatches());
-//                    List<SinkRecord> recordList = createSinkRecordList("foo", 0, 0, NUM_FAKE_RECORDS);
-//                    recordList.forEach(batches::buffer);
-//                    List<List<SinkRecord>> batchedList = partition(recordList, batchSize > 0 ? batchSize : recordList.size());
-//                    assertEquals(batchedList, batches.getBufferedBatches());
-//                }));
-//
-//    }
+
+    @TestFactory
+    @DisplayName("test batching with different config params for max.batch.size")
+    Stream<DynamicTest> testBatchingWithDifferentConfigsForBatchSize() {
+        Map<String, String> originals = new HashMap<>();
+        originals.put(DATABASE_CONFIG, "db");
+
+        return Stream.iterate(0, r -> r + 1).limit(NUM_FAKE_RECORDS + 1)
+                .map(batchSize -> dynamicTest("test batching for "
+                        + NUM_FAKE_RECORDS + " records with batchsize=" + batchSize, () -> {
+
+                    originals.put(MAX_BATCH_SIZE_CONFIG, batchSize.toString());
+                    MongoSinkTopicConfig topicConfig = new MongoSinkTopicConfig("foo", originals);
+
+                    RecordBatches batches = new RecordBatches(topicConfig, NUM_FAKE_RECORDS);
+                    assertEquals(LIST_INITIAL_EMPTY, batches.getBufferedBatches());
+                    List<SinkRecord> recordList = createSinkRecordList("foo", 0, 0, NUM_FAKE_RECORDS);
+                    recordList.forEach(batches::buffer);
+                    List<List<SinkRecord>> batchedList = partition(recordList, batchSize > 0 ? batchSize : recordList.size());
+                    assertEquals(batchedList, batches.getBufferedBatches());
+                }));
+
+    }
 
     private static List<SinkRecord> createSinkRecordList(final String topic, final int partition, final int beginOffset, final int size) {
         List<SinkRecord> list = new ArrayList<>();

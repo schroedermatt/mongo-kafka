@@ -33,7 +33,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import com.mongodb.MongoNamespace;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.connect.errors.ConnectException;
@@ -50,6 +49,7 @@ import org.bson.BsonDocument;
 
 import com.mongodb.MongoBulkWriteException;
 import com.mongodb.MongoException;
+import com.mongodb.MongoNamespace;
 import com.mongodb.bulk.BulkWriteResult;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
@@ -201,7 +201,7 @@ public class MongoSinkTask extends SinkTask {
         }
     }
 
-    private void checkRetriableException(final String key, final MongoException e, Integer deferRetryMs) {
+    private void checkRetriableException(final String key, final MongoException e, final Integer deferRetryMs) {
         if (remainingRetriesTopicMap.get(key).decrementAndGet() <= 0) {
             throw new DataException("Failed to write mongodb documents despite retrying", e);
         }
@@ -210,7 +210,7 @@ public class MongoSinkTask extends SinkTask {
         throw new RetriableException(e.getMessage(), e);
     }
 
-    Map<MongoNamespace, RecordBatches> createSinkRecordBatchesPerNamespace(Collection<SinkRecord> records) {
+    Map<MongoNamespace, RecordBatches> createSinkRecordBatchesPerNamespace(final Collection<SinkRecord> records) {
         Map<MongoNamespace, RecordBatches> batchMapping = new HashMap<>();
 
         LOGGER.debug("Buffering sink records into batches for each Mongo namespace (database/collection)");
@@ -252,7 +252,8 @@ public class MongoSinkTask extends SinkTask {
 
             RecordBatches batches = batchMapping.get(namespace);
             if (batches == null) {
-                LOGGER.debug("Batch size for collection {} is at most {} record(s)", namespace.getCollectionName(), config.getMaxBatchSize());
+                LOGGER.debug("Batch size for collection {} is at most {} record(s)",
+                    namespace.getCollectionName(), config.getMaxBatchSize());
                 batches = new RecordBatches(config, records.size());
                 batchMapping.put(namespace, batches);
             }

@@ -21,8 +21,9 @@ import static org.apache.kafka.connect.runtime.SinkConnectorConfig.TOPICS_CONFIG
 import java.util.HashMap;
 import java.util.Map;
 
-import com.mongodb.MongoNamespace;
 import org.bson.Document;
+
+import com.mongodb.MongoNamespace;
 
 public final class SinkTestHelper {
 
