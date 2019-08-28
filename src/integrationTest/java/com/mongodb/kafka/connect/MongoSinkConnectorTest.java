@@ -15,6 +15,7 @@
  */
 package com.mongodb.kafka.connect;
 
+import static com.mongodb.kafka.connect.mongodb.MongoDBHelper.ALT_DATABASE_NAME;
 import static java.lang.String.format;
 import static java.util.Arrays.asList;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -35,6 +36,7 @@ import org.junit.jupiter.api.Test;
 
 import com.mongodb.kafka.connect.avro.TweetMsg;
 import com.mongodb.kafka.connect.mongodb.MongoKafkaTestCase;
+import com.mongodb.kafka.connect.sink.MongoSinkTopicConfig;
 
 class MongoSinkConnectorTest extends MongoKafkaTestCase {
 
@@ -76,14 +78,7 @@ class MongoSinkConnectorTest extends MongoKafkaTestCase {
         KAFKA.createTopic(getTopicName());
         addSinkConnector();
 
-        Properties producerProps = new Properties();
-        producerProps.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, getTopicName());
-        producerProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.bootstrapServers());
-        producerProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, "io.confluent.kafka.serializers.KafkaAvroSerializer");
-        producerProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, "io.confluent.kafka.serializers.KafkaAvroSerializer");
-        producerProps.put(KafkaAvroSerializerConfig.SCHEMA_REGISTRY_URL_CONFIG, KAFKA.schemaRegistryUrl());
-        KafkaProducer<String, TweetMsg> producer = new KafkaProducer<>(producerProps);
-
+        KafkaProducer<String, TweetMsg> producer = getProducer();
         producer.initTransactions();
         producer.beginTransaction();
         tweets.forEach(tweet -> producer.send(new ProducerRecord<>(getTopicName(), tweet)));
@@ -91,5 +86,67 @@ class MongoSinkConnectorTest extends MongoKafkaTestCase {
 
         assertProduced(100);
         assertEquals(100, getCollection().countDocuments());
+    }
+
+    @Test
+    @DisplayName("Data is routed to multiple Mongo namespaces using record headers")
+    void testSinkSavesToMultipleNamespaces() {
+        String dbHeader = "MONGO_DB";
+        String collHeader = "MONGO_COLL";
+        String altCollection = "Other_Collection";
+
+        Stream<TweetMsg> tweets = IntStream.range(0, 100).mapToObj(i ->
+            TweetMsg.newBuilder().setId$1(i)
+                .setText(format("test tweet %s end2end testing apache kafka <-> mongodb sink connector is fun!", i))
+                .setHashtags(asList(format("t%s", i), "kafka", "mongodb", "testing"))
+                .build()
+        );
+
+        KAFKA.createTopic(getTopicName());
+
+        Properties overrides = new Properties();
+        overrides.put(MongoSinkTopicConfig.DATABASE_HEADER_CONFIG, dbHeader);
+        overrides.put(MongoSinkTopicConfig.COLLECTION_HEADER_CONFIG, collHeader);
+
+        addSinkConnector(overrides);
+
+        KafkaProducer<String, TweetMsg> producer = getProducer();
+        producer.initTransactions();
+        producer.beginTransaction();
+
+        tweets.forEach(tweet -> {
+            ProducerRecord<String, TweetMsg> record = new ProducerRecord<>(getTopicName(), tweet);
+            // every 2 messages, save to the alternate collection
+            if (tweet.getId$1() % 2 == 0) {
+                record.headers().add(collHeader, altCollection.getBytes());
+            }
+            // every 5 messages, save to the alternate database
+            if (tweet.getId$1() % 5 == 0) {
+                record.headers().add(dbHeader, ALT_DATABASE_NAME.getBytes());
+            }
+
+            producer.send(record);
+        });
+        producer.commitTransaction();
+
+        assertProduced(100);
+        // default database, default collection
+        assertEquals(40, getCollection().countDocuments());
+        // default database, alternate collection
+        assertEquals(40, getCollection(altCollection).countDocuments());
+        // alternate database, default collection
+        assertEquals(10, getMongoClient().getDatabase(ALT_DATABASE_NAME).getCollection(getCollectionName()).countDocuments());
+        // alternate database, alternate collection
+        assertEquals(10, getMongoClient().getDatabase(ALT_DATABASE_NAME).getCollection(altCollection).countDocuments());
+    }
+
+    private KafkaProducer<String, TweetMsg> getProducer() {
+        Properties producerProps = new Properties();
+        producerProps.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, getTopicName());
+        producerProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.bootstrapServers());
+        producerProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, "io.confluent.kafka.serializers.KafkaAvroSerializer");
+        producerProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, "io.confluent.kafka.serializers.KafkaAvroSerializer");
+        producerProps.put(KafkaAvroSerializerConfig.SCHEMA_REGISTRY_URL_CONFIG, KAFKA.schemaRegistryUrl());
+        return new KafkaProducer<>(producerProps);
     }
 }

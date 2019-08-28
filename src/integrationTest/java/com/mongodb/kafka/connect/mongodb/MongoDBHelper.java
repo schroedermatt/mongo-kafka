@@ -32,6 +32,7 @@ public class MongoDBHelper implements BeforeAllCallback, BeforeEachCallback, Aft
     private static final String DEFAULT_URI = "mongodb://localhost:27017";
     private static final String URI_SYSTEM_PROPERTY_NAME = "org.mongodb.test.uri";
     private static final String DEFAULT_DATABASE_NAME = "MongoKafkaTest";
+    public static final String ALT_DATABASE_NAME = "AltMongoKafkaTest";
 
     private static final Logger LOGGER = LoggerFactory.getLogger(MongoDBHelper.class);
 
@@ -57,6 +58,7 @@ public class MongoDBHelper implements BeforeAllCallback, BeforeEachCallback, Aft
     public void beforeEach(final ExtensionContext context) {
         if (mongoClient != null) {
             getDatabase().drop();
+            getDatabase(ALT_DATABASE_NAME).drop();
         }
     }
 
@@ -64,6 +66,7 @@ public class MongoDBHelper implements BeforeAllCallback, BeforeEachCallback, Aft
     public void afterEach(final ExtensionContext context) {
         if (mongoClient != null) {
             getDatabase().drop();
+            getDatabase(ALT_DATABASE_NAME).drop();
         }
     }
 
@@ -82,7 +85,11 @@ public class MongoDBHelper implements BeforeAllCallback, BeforeEachCallback, Aft
 
     public MongoDatabase getDatabase() {
         String databaseName = getConnectionString().getDatabase();
-        return getMongoClient().getDatabase(databaseName != null ? databaseName : DEFAULT_DATABASE_NAME);
+        return getDatabase(databaseName != null ? databaseName : DEFAULT_DATABASE_NAME);
+    }
+
+    public MongoDatabase getDatabase(String name) {
+        return getMongoClient().getDatabase(name);
     }
 
     public ConnectionString getConnectionString() {
