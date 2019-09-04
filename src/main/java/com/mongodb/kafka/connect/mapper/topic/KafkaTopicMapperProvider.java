@@ -29,7 +29,7 @@ public class KafkaTopicMapperProvider implements MapperProvider {
 
   @Override
   public String name() {
-    return "KafkaTopicMapper";
+    return KafkaTopicMapper.NAME;
   }
 
   @Override

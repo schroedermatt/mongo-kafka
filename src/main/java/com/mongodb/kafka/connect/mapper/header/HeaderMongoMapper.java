@@ -28,6 +28,7 @@ import com.mongodb.kafka.connect.sink.MongoSinkConfig;
 import com.mongodb.kafka.connect.sink.MongoSinkTopicConfig;
 
 public class HeaderMongoMapper implements MongoMapper {
+  public static final String NAME = "HeaderMongoMapper";
   public static final String DB_HEADER = "MONGO_DB";
   public static final String COLL_HEADER = "MONGO_COLL";
 

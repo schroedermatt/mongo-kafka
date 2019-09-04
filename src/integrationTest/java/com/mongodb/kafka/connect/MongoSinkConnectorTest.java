@@ -106,7 +106,7 @@ class MongoSinkConnectorTest extends MongoKafkaTestCase {
         KAFKA.createTopic(getTopicName());
 
         Properties overrides = new Properties();
-        overrides.put(MongoSinkTopicConfig.NAMESPACE_MAPPER_CONFIG, "HeaderMongoMapper");
+        overrides.put(MongoSinkTopicConfig.NAMESPACE_MAPPER_CONFIG, HeaderMongoMapper.NAME);
 
         addSinkConnector(overrides);
 

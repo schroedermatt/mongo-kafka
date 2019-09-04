@@ -38,6 +38,7 @@ import java.util.function.Consumer;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import com.mongodb.kafka.connect.mapper.topic.KafkaTopicMapper;
 import org.apache.kafka.common.config.AbstractConfig;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.config.ConfigValue;
@@ -87,7 +88,7 @@ public class MongoSinkTopicConfig extends AbstractConfig {
     public static final String NAMESPACE_MAPPER_CONFIG = "namespace.mapper";
     private static final String NAMESPACE_MAPPER_DISPLAY = "MongoDB Namespace Mapper";
     private static final String NAMESPACE_MAPPER_DOC = "The namespace mapper determines what MongoDB namespace each Kafka Record should be written to. By default, the namespace will be determined by the Kafka Topic.";
-    private static final String NAMESPACE_MAPPER_DEFAULT = "KafkaTopicMapper";
+    private static final String NAMESPACE_MAPPER_DEFAULT = KafkaTopicMapper.NAME;
 
     public static final String MAX_NUM_RETRIES_CONFIG = "max.num.retries";
     private static final String MAX_NUM_RETRIES_DISPLAY = "Max number of retries";

@@ -27,6 +27,8 @@ import com.mongodb.kafka.connect.sink.MongoSinkConfig;
 import com.mongodb.kafka.connect.sink.MongoSinkTopicConfig;
 
 public class KafkaTopicMapper implements MongoMapper {
+  public static final String NAME = "KafkaTopicMapper";
+
   private final MongoSinkConfig config;
 
   public KafkaTopicMapper(final MongoSinkConfig config) {

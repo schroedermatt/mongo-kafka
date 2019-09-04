@@ -29,7 +29,7 @@ public class HeaderMapperProvider implements MapperProvider {
 
   @Override
   public String name() {
-    return "HeaderMongoMapper";
+    return HeaderMongoMapper.NAME;
   }
 
   @Override
