@@ -1,0 +1,2 @@
+com.mongodb.kafka.connect.mapper.topic.KafkaTopicMapperProvider
+com.mongodb.kafka.connect.mapper.header.HeaderMapperProvider

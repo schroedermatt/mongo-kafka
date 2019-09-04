@@ -35,6 +35,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import com.mongodb.kafka.connect.avro.TweetMsg;
+import com.mongodb.kafka.connect.mapper.header.HeaderMongoMapper;
 import com.mongodb.kafka.connect.mongodb.MongoKafkaTestCase;
 import com.mongodb.kafka.connect.sink.MongoSinkTopicConfig;
 
@@ -91,8 +92,8 @@ class MongoSinkConnectorTest extends MongoKafkaTestCase {
     @Test
     @DisplayName("Data is routed to multiple Mongo namespaces using record headers")
     void testSinkSavesToMultipleNamespaces() {
-        String dbHeader = "MONGO_DB";
-        String collHeader = "MONGO_COLL";
+        String dbHeader = HeaderMongoMapper.DB_HEADER;
+        String collHeader = HeaderMongoMapper.COLL_HEADER;
         String altCollection = "Other_Collection";
 
         Stream<TweetMsg> tweets = IntStream.range(0, 100).mapToObj(i ->
@@ -105,8 +106,7 @@ class MongoSinkConnectorTest extends MongoKafkaTestCase {
         KAFKA.createTopic(getTopicName());
 
         Properties overrides = new Properties();
-        overrides.put(MongoSinkTopicConfig.DATABASE_HEADER_CONFIG, dbHeader);
-        overrides.put(MongoSinkTopicConfig.COLLECTION_HEADER_CONFIG, collHeader);
+        overrides.put(MongoSinkTopicConfig.NAMESPACE_MAPPER_CONFIG, "HeaderMongoMapper");
 
         addSinkConnector(overrides);
 

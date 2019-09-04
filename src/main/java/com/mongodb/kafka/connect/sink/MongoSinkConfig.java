@@ -79,7 +79,7 @@ public class MongoSinkConfig extends AbstractConfig {
         // eager load all topic configs
         createMongoSinkTopicConfig();
 
-        // load a default config set (used when inspecting headers to determine namespace)
+        // load a default config set
         defaultConfig = new MongoSinkTopicConfig(DEFAULT_TOPIC, originals);
     }
 
@@ -100,7 +100,7 @@ public class MongoSinkConfig extends AbstractConfig {
         return topics;
     }
 
-    MongoSinkTopicConfig getMongoSinkTopicConfig(final String topic) {
+    public MongoSinkTopicConfig getMongoSinkTopicConfig(final String topic) {
         if (!topics.contains(topic)) {
             throw new IllegalArgumentException(format("Unknown topic: %s, must be one of: %s", topic, topics));
         }
@@ -110,20 +110,12 @@ public class MongoSinkConfig extends AbstractConfig {
         return topicSinkConnectorConfigMap.get(topic);
     }
 
-    MongoSinkTopicConfig getDefaultConfig() {
+    public MongoSinkTopicConfig getDefaultConfig() {
       return this.defaultConfig;
     }
 
-    boolean inspectHeaders() {
-        return !getDatabaseHeader().isEmpty() || !getCollectionHeader().isEmpty();
-    }
-
-    String getDatabaseHeader() {
-        return getString(MongoSinkTopicConfig.DATABASE_HEADER_CONFIG);
-    }
-
-    String getCollectionHeader() {
-        return getString(MongoSinkTopicConfig.COLLECTION_HEADER_CONFIG);
+    public String getNamespaceMapper() {
+        return getDefaultConfig().getString(MongoSinkTopicConfig.NAMESPACE_MAPPER_CONFIG);
     }
 
     private void createMongoSinkTopicConfig() {

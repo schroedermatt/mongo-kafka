@@ -38,7 +38,6 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.errors.RetriableException;
-import org.apache.kafka.connect.header.Header;
 import org.apache.kafka.connect.sink.SinkRecord;
 import org.apache.kafka.connect.sink.SinkTask;
 import org.apache.kafka.connect.sink.SinkTaskContext;
@@ -57,6 +56,8 @@ import com.mongodb.client.model.BulkWriteOptions;
 import com.mongodb.client.model.WriteModel;
 
 import com.mongodb.kafka.connect.Versions;
+import com.mongodb.kafka.connect.mapper.MapperProviderLocator;
+import com.mongodb.kafka.connect.mapper.MongoMapper;
 import com.mongodb.kafka.connect.sink.converter.SinkConverter;
 import com.mongodb.kafka.connect.sink.converter.SinkDocument;
 import com.mongodb.kafka.connect.sink.processor.PostProcessors;
@@ -69,6 +70,7 @@ public class MongoSinkTask extends SinkTask {
     private MongoSinkConfig sinkConfig;
     private MongoClient mongoClient;
     private Map<String, AtomicInteger> remainingRetriesTopicMap;
+    private MongoMapper namespaceMapper;
 
     private SinkConverter sinkConverter = new SinkConverter();
 
@@ -88,6 +90,7 @@ public class MongoSinkTask extends SinkTask {
             sinkConfig = new MongoSinkConfig(props);
             remainingRetriesTopicMap = new ConcurrentHashMap<>(sinkConfig.getTopics().stream().collect(Collectors.toMap((t) -> t,
                             (t) -> new AtomicInteger(sinkConfig.getMongoSinkTopicConfig(t).getInt(MAX_NUM_RETRIES_CONFIG)))));
+            namespaceMapper = MapperProviderLocator.createMapper(sinkConfig, sinkConfig.getNamespaceMapper());
         } catch (Exception e) {
             throw new ConnectException("Failed to start new task", e);
         }
@@ -216,39 +219,8 @@ public class MongoSinkTask extends SinkTask {
         LOGGER.debug("Buffering sink records into batches for each Mongo namespace (database/collection)");
 
         records.forEach(r -> {
-            MongoSinkTopicConfig config;
-            MongoNamespace namespace;
-
-            if (sinkConfig.inspectHeaders()) {
-                config = sinkConfig.getDefaultConfig();
-                String database = config.getDatabase();
-                String collection = config.getNamespace().getCollectionName();
-
-                // check headers for an overriding value for db and/or coll
-                boolean dbMatch = false;
-                boolean collMatch = false;
-                if (r.headers() != null) {
-                    for (Header header : r.headers()) {
-                        if (!dbMatch && sinkConfig.getDatabaseHeader().equals(header.key())) {
-                            database = header.value().toString();
-                            dbMatch = true;
-                        } else if (!collMatch && sinkConfig.getCollectionHeader().equals(header.key())) {
-                            collection = header.value().toString();
-                            collMatch = true;
-                        }
-
-                        // break early if db and coll headers have already been found
-                        if (dbMatch && collMatch) {
-                            break;
-                        }
-                    }
-                }
-
-                namespace = new MongoNamespace(database, collection);
-            } else {
-                config = sinkConfig.getMongoSinkTopicConfig(r.topic());
-                namespace = config.getNamespace();
-            }
+            MongoSinkTopicConfig config = sinkConfig.getMongoSinkTopicConfig(r.topic());
+            MongoNamespace namespace = namespaceMapper.mapToNamespace(r);
 
             RecordBatches batches = batchMapping.get(namespace);
             if (batches == null) {
