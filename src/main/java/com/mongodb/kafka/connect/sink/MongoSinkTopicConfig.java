@@ -38,7 +38,6 @@ import java.util.function.Consumer;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import com.mongodb.kafka.connect.mapper.topic.KafkaTopicMapper;
 import org.apache.kafka.common.config.AbstractConfig;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.config.ConfigValue;
@@ -46,6 +45,7 @@ import org.apache.kafka.common.config.ConfigValue;
 import com.mongodb.MongoNamespace;
 
 import com.mongodb.kafka.connect.mapper.MapperProviderLocator;
+import com.mongodb.kafka.connect.mapper.topic.KafkaTopicMapper;
 import com.mongodb.kafka.connect.sink.cdc.CdcHandler;
 import com.mongodb.kafka.connect.sink.processor.BlacklistKeyProjector;
 import com.mongodb.kafka.connect.sink.processor.BlacklistValueProjector;
@@ -432,13 +432,15 @@ public class MongoSinkTopicConfig extends AbstractConfig {
         configDef.define(NAMESPACE_MAPPER_CONFIG,
             ConfigDef.Type.STRING,
             NAMESPACE_MAPPER_DEFAULT,
-            MapperProviderLocator.validator(),
+            MapperProviderLocator.validatorAndRecommender(),
             ConfigDef.Importance.MEDIUM,
             NAMESPACE_MAPPER_DOC,
             group,
             ++orderInGroup,
             ConfigDef.Width.LONG,
-            NAMESPACE_MAPPER_DISPLAY);
+            NAMESPACE_MAPPER_DISPLAY,
+            MapperProviderLocator.validatorAndRecommender()
+        );
 
         group = "Writes";
         orderInGroup = 0;

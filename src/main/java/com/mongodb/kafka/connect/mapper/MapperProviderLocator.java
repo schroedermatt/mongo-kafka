@@ -70,7 +70,7 @@ public final class MapperProviderLocator {
     LOGGER.debug("Registered {} mappers", count.get());
   }
 
-  public static MongoMapperValidator validator() {
+  public static MongoMapperValidator validatorAndRecommender() {
     return new MongoMapperValidator(availableMappers());
   }
 
@@ -89,7 +89,7 @@ public final class MapperProviderLocator {
 
     throw new MapperNotFoundException(
         String.format(
-            "Unable to find the mapper '%s' in the available set: %s",
+            "Unable to find the mapper '%s' in the set of loaded mappers: %s",
             mapperName,
             String.join(",", REGISTRY.keySet())
         )

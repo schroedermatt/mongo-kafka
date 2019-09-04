@@ -21,12 +21,19 @@ package com.mongodb.kafka.connect.mapper;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.config.ConfigException;
 
-public class MongoMapperValidator implements ConfigDef.Validator {
+/**
+ * Validates configuration values against the registered mapper providers.
+ *
+ * Recommends MongoMapper options based on the registered mapper providers.
+ */
+public class MongoMapperValidator implements ConfigDef.Validator, ConfigDef.Recommender {
 
   private final List<String> allowedValues;
 
@@ -40,5 +47,15 @@ public class MongoMapperValidator implements ConfigDef.Validator {
     if (value == null || !allowedValues.contains(value.toString())) {
       throw new ConfigException(name, value, "Must be one of " + allowedValues);
     }
+  }
+
+  @Override
+  public List<Object> validValues(final String name, final Map<String, Object> parsedConfig) {
+    return Collections.unmodifiableList(new ArrayList<>(allowedValues));
+  }
+
+  @Override
+  public boolean visible(final String name, final Map<String, Object> parsedConfig) {
+    return true;
   }
 }
