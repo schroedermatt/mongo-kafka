@@ -31,6 +31,7 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.IntegerSerializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.junit.Ignore;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -79,7 +80,7 @@ class MongoSinkConnectorTest extends MongoKafkaTestCase {
         KAFKA.createTopic(getTopicName());
         addSinkConnector();
 
-        KafkaProducer<String, TweetMsg> producer = getProducer();
+        KafkaProducer<String, TweetMsg> producer = getEmbeddedProducer();
         producer.initTransactions();
         producer.beginTransaction();
         tweets.forEach(tweet -> producer.send(new ProducerRecord<>(getTopicName(), tweet)));
@@ -110,7 +111,7 @@ class MongoSinkConnectorTest extends MongoKafkaTestCase {
 
         addSinkConnector(overrides);
 
-        KafkaProducer<String, TweetMsg> producer = getProducer();
+        KafkaProducer<String, TweetMsg> producer = getEmbeddedProducer();
         producer.initTransactions();
         producer.beginTransaction();
 
@@ -140,13 +141,60 @@ class MongoSinkConnectorTest extends MongoKafkaTestCase {
         assertEquals(10, getMongoClient().getDatabase(ALT_DATABASE_NAME).getCollection(altCollection).countDocuments());
     }
 
-    private KafkaProducer<String, TweetMsg> getProducer() {
+    @Test
+    @Ignore
+    void testSinkToConfluentPlatform() {
+        String cpTopic = "end.to.end";
+
+        String dbHeader = HeaderMongoMapper.DB_HEADER;
+        String collHeader = HeaderMongoMapper.COLL_HEADER;
+        String altCollection = "Other_Collection";
+
+        Stream<TweetMsg> tweets = IntStream.range(0, 100).mapToObj(i ->
+            TweetMsg.newBuilder().setId$1(i)
+                .setText(format("test tweet %s end2end testing apache kafka <-> mongodb sink connector is fun!", i))
+                .setHashtags(asList(format("t%s", i), "kafka", "mongodb", "testing"))
+                .build()
+        );
+
+        KafkaProducer<String, TweetMsg> producer = getLocalhostProducer();
+
+        producer.initTransactions();
+        producer.beginTransaction();
+
+        tweets.forEach(tweet -> {
+            ProducerRecord<String, TweetMsg> record = new ProducerRecord<>(cpTopic, tweet);
+            // every 2 messages, save to the alternate collection
+            if (tweet.getId$1() % 2 == 0) {
+                record.headers().add(collHeader, altCollection.getBytes());
+            }
+            // every 5 messages, save to the alternate database
+            if (tweet.getId$1() % 5 == 0) {
+                record.headers().add(dbHeader, ALT_DATABASE_NAME.getBytes());
+            }
+
+            producer.send(record);
+        });
+        producer.commitTransaction();
+    }
+
+    private KafkaProducer<String, TweetMsg> getEmbeddedProducer() {
         Properties producerProps = new Properties();
         producerProps.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, getTopicName());
         producerProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.bootstrapServers());
         producerProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, "io.confluent.kafka.serializers.KafkaAvroSerializer");
         producerProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, "io.confluent.kafka.serializers.KafkaAvroSerializer");
         producerProps.put(KafkaAvroSerializerConfig.SCHEMA_REGISTRY_URL_CONFIG, KAFKA.schemaRegistryUrl());
+        return new KafkaProducer<>(producerProps);
+    }
+
+    private KafkaProducer<String, TweetMsg> getLocalhostProducer() {
+        Properties producerProps = new Properties();
+        producerProps.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, getTopicName());
+        producerProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
+        producerProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, "io.confluent.kafka.serializers.KafkaAvroSerializer");
+        producerProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, "io.confluent.kafka.serializers.KafkaAvroSerializer");
+        producerProps.put(KafkaAvroSerializerConfig.SCHEMA_REGISTRY_URL_CONFIG, "http://localhost:8081");
         return new KafkaProducer<>(producerProps);
     }
 }
