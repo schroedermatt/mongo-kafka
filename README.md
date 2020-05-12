@@ -5,7 +5,7 @@ The official MongoDB Kafka Connector.
 
 ## Documentation
 
-See the [pre-release documentation](./docs/README.md)
+Documentation for the connector is available on [https://docs.mongodb.com/kafka-connector/current/](https://docs.mongodb.com/kafka-connector/current/)
 
 ## Downloading
 
@@ -13,9 +13,10 @@ The connector will be published on [maven central](https://search.maven.org/sear
 
 ## Support / Feedback
 
-For issues with, questions about, or feedback for the MongoDB Kafka Connector, please look into
-our [support channels](https://docs.mongodb.com/manual/support/). Please do not email any of the developers directly with issues or
-questions - you're more likely to get an answer on the [mongodb-user](https://groups.google.com/group/mongodb-user) discussion forum.
+For issues with, questions about, or feedback for the MongoDB Kafka Connector, please look into our
+[support channels](http://www.mongodb.org/about/support). Please do not email any of the Kafka connector developers directly with issues or
+questions - you're more likely to get an answer on the
+[MongoDB Community Forums](https://community.mongodb.com/tags/c/drivers-odms-connectors/7/kafka-connector).
 
 At a minimum, please include in your description the exact version of the driver that you are using.  If you are having
 connectivity issues, it's often also useful to paste in the Kafka connector configuration. You should also check your application logs for
@@ -37,7 +38,7 @@ If you’ve identified a security vulnerability in a connector or any other Mong
 ## Versioning
 
 The MongoDB Kafka Connector follows semantic versioning.
-See the [changelog](./doc/changelog.md) for information about changes between releases.
+See the [changelog](./docs/changelog.md) for information about changes between releases.
 
 ## Build
 
@@ -60,6 +61,11 @@ The test suite requires mongod to be running. Note, the source connector require
 Original Sink connector work by: Hans-Peter Grahsl : https://github.com/hpgrahsl/kafka-connect-mongodb
 
 Additional contributors can be found [here](https://github.com/mongodb/mongo-kafka/graphs/contributors).
+
+## Release process
+
+- `./gradlew publishArchives` - publishes to Maven
+-  `./gradlew createConfluentArchive` - creates the confluent archive / github release zip file
 
 ## IntelliJ IDEA
 

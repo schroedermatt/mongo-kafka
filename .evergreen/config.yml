@@ -193,14 +193,14 @@ functions:
   "upload test results":
     - command: attach.xunit_results
       params:
-        file: ./src/*/build/test-results/*.xml
+        file: ./src/build/test-results/*/*.xml
 
   "bootstrap mongo-orchestration":
     - command: shell.exec
       params:
         script: |
           ${PREPARE_SHELL}
-          MONGODB_VERSION=${VERSION} TOPOLOGY=${TOPOLOGY} AUTH=${AUTH} SSL=${SSL} sh ${DRIVERS_TOOLS}/.evergreen/run-orchestration.sh
+          MONGODB_VERSION=${VERSION} TOPOLOGY=${TOPOLOGY} AUTH=auth SSL=${SSL} sh ${DRIVERS_TOOLS}/.evergreen/run-orchestration.sh
     # run-orchestration generates expansion file with the MONGODB_URI for the cluster
     - command: expansions.update
       params:
@@ -339,10 +339,18 @@ axes:
   - id: "version"
     display_name: "MongoDB Version"
     values:
+      - id: "3.6"
+        display_name: "3.6"
+        variables:
+          VERSION: "3.6"
       - id: "4.0"
         display_name: "4.0"
         variables:
           VERSION: "4.0"
+      - id: "4.2"
+        display_name: "4.2"
+        variables:
+          VERSION: "4.2"
       - id: "latest"
         display_name: "latest"
         variables:

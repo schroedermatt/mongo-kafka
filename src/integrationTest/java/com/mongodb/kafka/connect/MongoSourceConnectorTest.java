@@ -15,7 +15,15 @@
  */
 package com.mongodb.kafka.connect;
 
+import static com.mongodb.kafka.connect.mongodb.ChangeStreamOperations.concat;
+import static com.mongodb.kafka.connect.mongodb.ChangeStreamOperations.createDropCollection;
+import static com.mongodb.kafka.connect.mongodb.ChangeStreamOperations.createDropDatabase;
+import static com.mongodb.kafka.connect.mongodb.ChangeStreamOperations.createInsert;
+import static com.mongodb.kafka.connect.mongodb.ChangeStreamOperations.createInserts;
 import static java.lang.String.format;
+import static java.util.Arrays.asList;
+import static java.util.Collections.emptyList;
+import static java.util.Collections.singletonList;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.IntStream.rangeClosed;
 import static org.junit.jupiter.api.Assertions.assertAll;
@@ -59,43 +67,85 @@ public class MongoSourceConnectorTest extends MongoKafkaTestCase {
     }
 
     @Test
-    @DisplayName("Ensure source loads data from MongoDB MongoClient")
+    @DisplayName("Ensure source loads data from MongoClient")
     void testSourceLoadsDataFromMongoClient() {
+        assumeTrue(isGreaterThanThreeDotSix());
         addSourceConnector();
 
-        MongoCollection<Document> coll1 = getDatabase("1").getCollection("coll");
-        MongoCollection<Document> coll2 = getDatabase("2").getCollection("coll");
-        MongoCollection<Document> coll3 = getDatabase("3").getCollection("coll");
-        MongoCollection<Document> coll4 = getDatabase("1").getCollection("db1Coll2");
+        MongoDatabase db1 = getDatabaseWithPostfix();
+        MongoDatabase db2 = getDatabaseWithPostfix();
+        MongoDatabase db3 = getDatabaseWithPostfix();
+        MongoCollection<Document> coll1 = db1.getCollection("coll");
+        MongoCollection<Document> coll2 = db2.getCollection("coll");
+        MongoCollection<Document> coll3 = db3.getCollection("coll");
+        MongoCollection<Document> coll4 = db1.getCollection("db1Coll2");
 
         insertMany(rangeClosed(1, 50), coll1, coll2);
 
         assertAll(
-                () -> assertProduced(50, coll1),
-                () -> assertProduced(50, coll2),
-                () -> assertProduced(0, coll3));
+                () -> assertProduced(createInserts(1, 50), coll1),
+                () -> assertProduced(createInserts(1, 50), coll2),
+                () -> assertProduced(emptyList(), coll3)
+        );
 
 
-        getDatabase("1").drop();
+        db1.drop();
         insertMany(rangeClosed(51, 60), coll2, coll4);
         insertMany(rangeClosed(1, 70), coll3);
 
         assertAll(
-                () -> assertProduced(51, coll1),
-                () -> assertProduced(60, coll2),
-                () -> assertProduced(70, coll3),
-                () -> assertProduced(10, coll4)
+                () -> assertProduced(concat(createInserts(1, 50), singletonList(createDropCollection())), coll1),
+                () -> assertProduced(createInserts(1, 60), coll2),
+                () -> assertProduced(createInserts(1, 70), coll3),
+                () -> assertProduced(createInserts(51, 60), coll4)
         );
     }
 
     @Test
-    @DisplayName("Ensure source loads data from MongoDB database")
+    @DisplayName("Ensure source loads data from MongoClient with copy existing data")
+    void testSourceLoadsDataFromMongoClientWithCopyExisting() {
+        assumeTrue(isGreaterThanThreeDotSix());
+        Properties sourceProperties = new Properties();
+        sourceProperties.put(MongoSourceConfig.COPY_EXISTING_CONFIG, "true");
+        addSourceConnector(sourceProperties);
+
+        MongoDatabase db1 = getDatabaseWithPostfix();
+        MongoDatabase db2 = getDatabaseWithPostfix();
+        MongoDatabase db3 = getDatabaseWithPostfix();
+        MongoCollection<Document> coll1 = db1.getCollection("coll");
+        MongoCollection<Document> coll2 = db2.getCollection("coll");
+        MongoCollection<Document> coll3 = db3.getCollection("coll");
+        MongoCollection<Document> coll4 = db1.getCollection("db1Coll2");
+
+        insertMany(rangeClosed(1, 50), coll1, coll2);
+
+        assertAll(
+                () -> assertProduced(createInserts(1, 50), coll1),
+                () -> assertProduced(createInserts(1, 50), coll2),
+                () -> assertProduced(emptyList(), coll3)
+        );
+
+        db1.drop();
+        insertMany(rangeClosed(51, 60), coll2, coll4);
+        insertMany(rangeClosed(1, 70), coll3);
+
+        assertAll(
+                () -> assertProduced(concat(createInserts(1, 50), singletonList(createDropCollection())), coll1),
+                () -> assertProduced(createInserts(1, 60), coll2),
+                () -> assertProduced(createInserts(1, 70), coll3),
+                () -> assertProduced(createInserts(51, 60), coll4)
+        );
+    }
+
+    @Test
+    @DisplayName("Ensure source loads data from database")
     void testSourceLoadsDataFromDatabase() {
+        assumeTrue(isGreaterThanThreeDotSix());
         try (KafkaConsumer<?, ?> consumer = createConsumer()) {
             Pattern pattern = Pattern.compile(format("^%s.*", getDatabaseName()));
             consumer.subscribe(pattern);
 
-            MongoDatabase db = getDatabase("4");
+            MongoDatabase db = getDatabaseWithPostfix();
 
             Properties sourceProperties = new Properties();
             sourceProperties.put(MongoSourceConfig.DATABASE_CONFIG, db.getName());
@@ -108,9 +158,9 @@ public class MongoSourceConnectorTest extends MongoKafkaTestCase {
             insertMany(rangeClosed(1, 50), coll1, coll2);
 
             assertAll(
-                    () -> assertProduced(50, coll1),
-                    () -> assertProduced(50, coll2),
-                    () -> assertProduced(0, coll3)
+                    () -> assertProduced(createInserts(1, 50), coll1),
+                    () -> assertProduced(createInserts(1, 50), coll2),
+                    () -> assertProduced(emptyList(), coll3)
             );
 
             // Update some of the collections
@@ -126,10 +176,113 @@ public class MongoSourceConnectorTest extends MongoKafkaTestCase {
             insertMany(rangeClosed(21, 30), coll4);
 
             assertAll(
-                    () -> assertProduced(51, coll1),
-                    () -> assertProduced(51, coll2),
-                    () -> assertProduced(21, coll3),
-                    () -> assertProduced(10, coll4)
+                    () -> assertProduced(concat(createInserts(1, 50), singletonList(createDropCollection())), coll1),
+                    () -> assertProduced(concat(createInserts(1, 50), singletonList(createDropCollection())), coll2),
+                    () -> assertProduced(concat(createInserts(1, 20), singletonList(createDropCollection())), coll3),
+                    () -> assertProduced(createInserts(21, 30), coll4)
+            );
+        }
+    }
+
+    @Test
+    @DisplayName("Ensure source loads data from database with copy existing data")
+    void testSourceLoadsDataFromDatabaseCopyExisting() {
+        assumeTrue(isGreaterThanThreeDotSix());
+        try (KafkaConsumer<?, ?> consumer = createConsumer()) {
+            Pattern pattern = Pattern.compile(format("^%s.*", getDatabaseName()));
+            consumer.subscribe(pattern);
+
+            MongoDatabase db = getDatabaseWithPostfix();
+
+            MongoCollection<Document> coll1 = db.getCollection("coll1");
+            MongoCollection<Document> coll2 = db.getCollection("coll2");
+            MongoCollection<Document> coll3 = db.getCollection("coll3");
+
+            insertMany(rangeClosed(1, 50), coll1, coll2);
+
+            Properties sourceProperties = new Properties();
+            sourceProperties.put(MongoSourceConfig.DATABASE_CONFIG, db.getName());
+            sourceProperties.put(MongoSourceConfig.COPY_EXISTING_CONFIG, "true");
+            addSourceConnector(sourceProperties);
+
+            assertAll(
+                    () -> assertProduced(createInserts(1, 50), coll1),
+                    () -> assertProduced(createInserts(1, 50), coll2),
+                    () -> assertProduced(emptyList(), coll3)
+            );
+
+            // Update some of the collections
+            coll1.drop();
+            coll2.drop();
+
+            insertMany(rangeClosed(1, 20), coll3);
+
+            String collName4 = "coll4";
+            coll3.renameCollection(new MongoNamespace(getDatabaseName(), collName4));
+            MongoCollection<Document> coll4 = db.getCollection(collName4);
+
+            insertMany(rangeClosed(21, 30), coll4);
+
+            assertAll(
+                    () -> assertProduced(concat(createInserts(1, 50), singletonList(createDropCollection())), coll1),
+                    () -> assertProduced(concat(createInserts(1, 50), singletonList(createDropCollection())), coll2),
+                    () -> assertProduced(concat(createInserts(1, 20), singletonList(createDropCollection())), coll3),
+                    () -> assertProduced(createInserts(21, 30), coll4)
+            );
+        }
+    }
+
+    @Test
+    @DisplayName("Ensure source can handle non existent database and survive dropping")
+    void testSourceCanHandleNonExistentDatabaseAndSurviveDropping() throws InterruptedException {
+        assumeTrue(isGreaterThanThreeDotSix());
+        try (KafkaConsumer<?, ?> consumer = createConsumer()) {
+            Pattern pattern = Pattern.compile(format("^%s.*", getDatabaseName()));
+            consumer.subscribe(pattern);
+
+            MongoDatabase db = getDatabaseWithPostfix();
+            MongoCollection<Document> coll1 = db.getCollection("coll1");
+            MongoCollection<Document> coll2 = db.getCollection("coll2");
+            MongoCollection<Document> coll3 = db.getCollection("coll3");
+            db.drop();
+
+            Properties sourceProperties = new Properties();
+            sourceProperties.put(MongoSourceConfig.DATABASE_CONFIG, db.getName());
+            addSourceConnector(sourceProperties);
+
+            Thread.sleep(5000);
+            assertAll(
+                    () -> assertProduced(emptyList(), coll1),
+                    () -> assertProduced(emptyList(), coll2),
+                    () -> assertProduced(emptyList(), coll3),
+                    () -> assertProduced(emptyList(), db.getName())
+            );
+
+            insertMany(rangeClosed(1, 50), coll1, coll2);
+            insertMany(rangeClosed(1, 1), coll3);
+
+            assertAll(
+                    () -> assertProduced(createInserts(1, 50), coll1),
+                    () -> assertProduced(createInserts(1, 50), coll2),
+                    () -> assertProduced(singletonList(createInsert(1)), coll3),
+                    () -> assertProduced(emptyList(), db.getName())
+            );
+
+            db.drop();
+            assertAll(
+                    () -> assertProduced(concat(createInserts(1, 50), singletonList(createDropCollection())), coll1),
+                    () -> assertProduced(concat(createInserts(1, 50), singletonList(createDropCollection())), coll2),
+                    () -> assertProduced(asList(createInsert(1), createDropCollection()), coll3),
+                    () -> assertProduced(singletonList(createDropDatabase()), db.getName())
+            );
+
+            insertMany(rangeClosed(51, 100), coll1, coll2, coll3);
+
+            assertAll(
+                () -> assertProduced(concat(createInserts(1, 50), singletonList(createDropCollection()), createInserts(51, 100)), coll1),
+                () -> assertProduced(concat(createInserts(1, 50), singletonList(createDropCollection()), createInserts(51, 100)), coll2),
+                () -> assertProduced(concat(asList(createInsert(1), createDropCollection()), createInserts(51, 100)), coll3),
+                () -> assertProduced(singletonList(createDropDatabase()), db.getName())
             );
         }
     }
@@ -137,7 +290,7 @@ public class MongoSourceConnectorTest extends MongoKafkaTestCase {
     @Test
     @DisplayName("Ensure source loads data from collection")
     void testSourceLoadsDataFromCollection() {
-        MongoCollection<Document> coll = getDatabase("5").getCollection("coll");
+        MongoCollection<Document> coll = getAndCreateCollection();
 
         Properties sourceProperties = new Properties();
         sourceProperties.put(MongoSourceConfig.DATABASE_CONFIG, coll.getNamespace().getDatabaseName());
@@ -145,32 +298,184 @@ public class MongoSourceConnectorTest extends MongoKafkaTestCase {
         addSourceConnector(sourceProperties);
 
         insertMany(rangeClosed(1, 100), coll);
-        assertProduced(100, coll);
+        assertProduced(createInserts(1, 100), coll);
+
+        if (isGreaterThanThreeDotSix()) {
+            coll.drop();
+            assertProduced(concat(createInserts(1, 100), singletonList(createDropCollection())), coll);
+        }
+    }
+
+    @Test
+    @DisplayName("Ensure source loads data from collection with copy existing data")
+    void testSourceLoadsDataFromCollectionCopyExisting() {
+        MongoCollection<Document> coll = getAndCreateCollection();
+
+        insertMany(rangeClosed(1, 50), coll);
+
+        Properties sourceProperties = new Properties();
+        sourceProperties.put(MongoSourceConfig.DATABASE_CONFIG, coll.getNamespace().getDatabaseName());
+        sourceProperties.put(MongoSourceConfig.COLLECTION_CONFIG, coll.getNamespace().getCollectionName());
+        sourceProperties.put(MongoSourceConfig.COPY_EXISTING_CONFIG, "true");
+        addSourceConnector(sourceProperties);
+
+        assertProduced(createInserts(1, 50), coll);
+
+        insertMany(rangeClosed(51, 100), coll);
+        assertProduced(createInserts(1, 100), coll);
+
+        if (isGreaterThanThreeDotSix()) {
+            coll.drop();
+            assertProduced(concat(createInserts(1, 100), singletonList(createDropCollection())), coll);
+        }
+    }
+
+    @Test
+    @DisplayName("Ensure source can handle non existent collection and survive dropping")
+    void testSourceCanHandleNonExistentCollectionAndSurviveDropping() throws InterruptedException {
+        assumeTrue(isGreaterThanThreeDotSix());
+        MongoCollection<Document> coll = getDatabaseWithPostfix().getCollection("coll");
+
+        Properties sourceProperties = new Properties();
+        sourceProperties.put(MongoSourceConfig.DATABASE_CONFIG, coll.getNamespace().getDatabaseName());
+        sourceProperties.put(MongoSourceConfig.COLLECTION_CONFIG, coll.getNamespace().getCollectionName());
+        addSourceConnector(sourceProperties);
+
+        Thread.sleep(5000);
+        assertProduced(emptyList(), coll);
+
+        insertMany(rangeClosed(1, 100), coll);
+        assertProduced(createInserts(1, 100), coll);
 
         coll.drop();
-        assertProduced(100, coll);
+        assertProduced(concat(createInserts(1, 100), singletonList(createDropCollection())), coll);
+
+        insertMany(rangeClosed(101, 200), coll);
+        assertProduced(concat(createInserts(1, 100), singletonList(createDropCollection()), createInserts(101, 200)), coll);
+    }
+
+    @Test
+    @DisplayName("Ensure source can handle a pipeline watching inserts on a non existent collection and survive dropping")
+    void testSourceCanSurviveDroppingWithPipelineWatchingInsertsOnly() throws InterruptedException {
+        assumeTrue(isGreaterThanThreeDotSix());
+        MongoCollection<Document> coll = getDatabaseWithPostfix().getCollection("coll");
+
+        Properties sourceProperties = new Properties();
+        sourceProperties.put(MongoSourceConfig.DATABASE_CONFIG, coll.getNamespace().getDatabaseName());
+        sourceProperties.put(MongoSourceConfig.COLLECTION_CONFIG, coll.getNamespace().getCollectionName());
+        sourceProperties.put(MongoSourceConfig.PIPELINE_CONFIG, "[{\"$match\": {\"operationType\": \"insert\"}}]");
+        addSourceConnector(sourceProperties);
+
+        Thread.sleep(5000);
+        assertProduced(emptyList(), coll);
+
+        insertMany(rangeClosed(1, 50), coll);
+        assertProduced(createInserts(1, 50), coll);
+
+        coll.drop();
+        Thread.sleep(5000);
+
+        insertMany(rangeClosed(51, 100), coll);
+        assertProduced(createInserts(1, 100), coll);
     }
 
     @Test
     @DisplayName("Ensure source loads data from collection and outputs documents only")
     void testSourceLoadsDataFromCollectionDocumentOnly() {
-        MongoCollection<Document> coll = getDatabase("6").getCollection("coll");
+        MongoCollection<Document> coll = getAndCreateCollection();
+
+        List<Document> docs = insertMany(rangeClosed(1, 50), coll);
 
         Properties sourceProperties = new Properties();
         sourceProperties.put(MongoSourceConfig.DATABASE_CONFIG, coll.getNamespace().getDatabaseName());
         sourceProperties.put(MongoSourceConfig.COLLECTION_CONFIG, coll.getNamespace().getCollectionName());
         sourceProperties.put(MongoSourceConfig.PUBLISH_FULL_DOCUMENT_ONLY_CONFIG, "true");
+        sourceProperties.put(MongoSourceConfig.COPY_EXISTING_CONFIG, "true");
         addSourceConnector(sourceProperties);
 
-        List<Document> docs = insertMany(rangeClosed(1, 100), coll);
-        assertProduced(docs, coll);
+        assertProducedDocs(docs, coll);
+
+        List<Document> allDocs = new ArrayList<>(docs);
+        allDocs.addAll(insertMany(rangeClosed(51, 100), coll));
 
         coll.drop();
-        assertProduced(docs, coll);
+        assertProducedDocs(allDocs, coll);
     }
 
-    private MongoDatabase getDatabase(final String postfix) {
-        return getMongoClient().getDatabase(format("%s%s", getDatabaseName(), postfix));
+    @Test
+    @DisplayName("Ensure source can survive a restart")
+    void testSourceSurvivesARestart() {
+        MongoCollection<Document> coll = getAndCreateCollection();
+
+        Properties sourceProperties = new Properties();
+        sourceProperties.put(MongoSourceConfig.DATABASE_CONFIG, coll.getNamespace().getDatabaseName());
+        sourceProperties.put(MongoSourceConfig.COLLECTION_CONFIG, coll.getNamespace().getCollectionName());
+        addSourceConnector(sourceProperties);
+
+        insertMany(rangeClosed(1, 50), coll);
+        assertProduced(createInserts(1, 50), coll);
+
+        restartSourceConnector(sourceProperties);
+        insertMany(rangeClosed(51, 100), coll);
+
+        assertProduced(createInserts(1, 100), coll);
+    }
+
+    @Test
+    @DisplayName("Ensure source can survive a restart with a drop")
+    void testSourceSurvivesARestartWithDrop() {
+        assumeTrue(isGreaterThanThreeDotSix());
+        MongoCollection<Document> coll = getDatabaseWithPostfix().getCollection("coll");
+
+        Properties sourceProperties = new Properties();
+        sourceProperties.put(MongoSourceConfig.DATABASE_CONFIG, coll.getNamespace().getDatabaseName());
+        sourceProperties.put(MongoSourceConfig.COLLECTION_CONFIG, coll.getNamespace().getCollectionName());
+        addSourceConnector(sourceProperties);
+
+        insertMany(rangeClosed(1, 50), coll);
+        assertProduced(createInserts(1, 50), coll);
+
+        coll.drop();
+        assertProduced(concat(createInserts(1, 50), singletonList(createDropCollection())), coll);
+
+        restartSourceConnector(sourceProperties);
+        insertMany(rangeClosed(51, 100), coll);
+
+        assertProduced(concat(createInserts(1, 50), singletonList(createDropCollection()), createInserts(51, 100)), coll);
+    }
+
+    @Test
+    @DisplayName("Ensure source can survive a restart with a drop when watching just inserts")
+    void testSourceSurvivesARestartWithDropIncludingPipeline() {
+        assumeTrue(isGreaterThanThreeDotSix());
+        MongoCollection<Document> coll = getDatabaseWithPostfix().getCollection("coll");
+
+        Properties sourceProperties = new Properties();
+        sourceProperties.put(MongoSourceConfig.DATABASE_CONFIG, coll.getNamespace().getDatabaseName());
+        sourceProperties.put(MongoSourceConfig.COLLECTION_CONFIG, coll.getNamespace().getCollectionName());
+        sourceProperties.put(MongoSourceConfig.PIPELINE_CONFIG, "[{\"$match\": {\"operationType\": \"insert\"}}]");
+        addSourceConnector(sourceProperties);
+
+        insertMany(rangeClosed(1, 50), coll);
+        assertProduced(createInserts(1, 50), coll);
+
+        coll.drop();
+        assertProduced(createInserts(1, 50), coll);
+
+        restartSourceConnector(sourceProperties);
+        insertMany(rangeClosed(51, 100), coll);
+
+        assertProduced(createInserts(1, 100), coll);
+    }
+
+    private MongoDatabase getDatabaseWithPostfix() {
+        return getMongoClient().getDatabase(format("%s%s", getDatabaseName(), POSTFIX.incrementAndGet()));
+    }
+
+    private MongoCollection<Document> getAndCreateCollection() {
+        MongoDatabase database = getDatabaseWithPostfix();
+        database.createCollection("coll");
+        return database.getCollection("coll");
     }
 
     private List<Document> insertMany(final IntStream stream, final MongoCollection<?>... collections) {

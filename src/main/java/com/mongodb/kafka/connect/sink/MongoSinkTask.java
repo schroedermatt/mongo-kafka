@@ -22,6 +22,7 @@ import static com.mongodb.kafka.connect.sink.MongoSinkTopicConfig.MAX_BATCH_SIZE
 import static com.mongodb.kafka.connect.sink.MongoSinkTopicConfig.MAX_NUM_RETRIES_CONFIG;
 import static com.mongodb.kafka.connect.sink.MongoSinkTopicConfig.RETRIES_DEFER_TIMEOUT_CONFIG;
 import static com.mongodb.kafka.connect.util.ConfigHelper.getMongoDriverInformation;
+import static java.util.Collections.emptyList;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -63,6 +64,7 @@ import com.mongodb.kafka.connect.sink.writemodel.strategy.WriteModelStrategy;
 
 public class MongoSinkTask extends SinkTask {
     private static final Logger LOGGER = LoggerFactory.getLogger(MongoSinkTask.class);
+    private static final String CONNECTOR_TYPE = "sink";
     private static final BulkWriteOptions BULK_WRITE_OPTIONS = new BulkWriteOptions();
 
     private MongoSinkConfig sinkConfig;
@@ -85,7 +87,8 @@ public class MongoSinkTask extends SinkTask {
         LOGGER.info("Starting MongoDB sink task");
         try {
             sinkConfig = new MongoSinkConfig(props);
-            remainingRetriesTopicMap = new ConcurrentHashMap<>(sinkConfig.getTopics().stream().collect(Collectors.toMap((t) -> t,
+            remainingRetriesTopicMap = new ConcurrentHashMap<>(sinkConfig.getTopics().orElse(emptyList()).stream()
+                    .collect(Collectors.toMap((t) -> t,
                             (t) -> new AtomicInteger(sinkConfig.getMongoSinkTopicConfig(t).getInt(MAX_NUM_RETRIES_CONFIG)))));
         } catch (Exception e) {
             throw new ConnectException("Failed to start new task", e);
@@ -159,7 +162,7 @@ public class MongoSinkTask extends SinkTask {
 
     private MongoClient getMongoClient() {
         if (mongoClient == null) {
-            mongoClient = MongoClients.create(sinkConfig.getConnectionString(), getMongoDriverInformation());
+            mongoClient = MongoClients.create(sinkConfig.getConnectionString(), getMongoDriverInformation(CONNECTOR_TYPE));
         }
         return mongoClient;
     }
@@ -179,20 +182,28 @@ public class MongoSinkTask extends SinkTask {
             }
         } catch (MongoBulkWriteException e) {
             LOGGER.error("Mongodb bulk write (partially) failed", e);
-            LOGGER.error(e.getWriteResult().toString());
-            LOGGER.error(e.getWriteErrors().toString());
-            LOGGER.error(e.getWriteConcernError().toString());
+            LOGGER.error("WriteResult: {}", e.getWriteResult());
+            LOGGER.error("WriteErrors: {}", e.getWriteErrors());
+            LOGGER.error("WriteConcernError: {}", e.getWriteConcernError());
             checkRetriableException(config, e);
         } catch (MongoException e) {
             LOGGER.error("Error on mongodb operation", e);
             LOGGER.error("Writing {} document(s) into collection [{}] failed -> remaining retries ({})",
-                    writeModels.size(), config.getNamespace().getFullName(), remainingRetriesTopicMap.get(config.getTopic()).get());
+                    writeModels.size(), config.getNamespace().getFullName(), getRemainingRetriesForTopic(config.getTopic()).get());
             checkRetriableException(config, e);
         }
     }
 
+    private AtomicInteger getRemainingRetriesForTopic(final String topic) {
+        if (!remainingRetriesTopicMap.containsKey(topic)) {
+            remainingRetriesTopicMap.put(topic, new AtomicInteger(sinkConfig.getMongoSinkTopicConfig(topic)
+                    .getInt(MAX_NUM_RETRIES_CONFIG)));
+        }
+        return remainingRetriesTopicMap.get(topic);
+    }
+
     private void checkRetriableException(final MongoSinkTopicConfig config, final MongoException e) {
-        if (remainingRetriesTopicMap.get(config.getTopic()).decrementAndGet() <= 0) {
+        if (getRemainingRetriesForTopic(config.getTopic()).decrementAndGet() <= 0) {
             throw new DataException("Failed to write mongodb documents despite retrying", e);
         }
         Integer deferRetryMs = config.getInt(RETRIES_DEFER_TIMEOUT_CONFIG);
