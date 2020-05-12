@@ -15,14 +15,19 @@
  */
 package com.mongodb.kafka.connect.mongodb;
 
+import static com.mongodb.kafka.connect.mongodb.ChangeStreamOperations.ChangeStreamOperation;
+import static com.mongodb.kafka.connect.mongodb.ChangeStreamOperations.createChangeStreamOperation;
+import static java.lang.String.format;
 import static java.util.Collections.singletonList;
 import static org.apache.kafka.common.utils.Utils.sleep;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertIterableEquals;
 
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import io.confluent.connect.avro.AvroConverter;
@@ -51,6 +56,7 @@ import com.mongodb.kafka.connect.source.MongoSourceConfig;
 
 public class MongoKafkaTestCase {
     protected static final Logger LOGGER = LoggerFactory.getLogger(MongoKafkaTestCase.class);
+    protected static final AtomicInteger POSTFIX = new AtomicInteger();
 
     @RegisterExtension
     public static final EmbeddedKafka KAFKA = new EmbeddedKafka();
@@ -58,7 +64,7 @@ public class MongoKafkaTestCase {
     public static final MongoDBHelper MONGODB = new MongoDBHelper();
 
     public String getTopicName() {
-        return getCollection().getNamespace().getFullName();
+        return  format("%s%s",  getCollection().getNamespace().getFullName(), POSTFIX.incrementAndGet());
     }
 
     public MongoClient getMongoClient() {
@@ -91,19 +97,26 @@ public class MongoKafkaTestCase {
         return isMaster.containsKey("setName") || isMaster.get("msg", "").equals("isdbgrid");
     }
 
-    public void assertProduced(final int expectedCount) {
-        assertProduced(expectedCount, getCollection());
-    }
-
-    public void assertProduced(final int expectedCount, final MongoCollection<?> coll) {
-        assertProduced(expectedCount, coll.getNamespace().getFullName());
+    public boolean isGreaterThanThreeDotSix() {
+        Document isMaster = MONGODB.getMongoClient().getDatabase("admin").runCommand(BsonDocument.parse("{isMaster: 1}"));
+        return isMaster.get("maxWireVersion", 0) > 6;
     }
 
     public void assertProduced(final int expectedCount, final String topicName) {
         assertEquals(expectedCount, getProduced(expectedCount, topicName).size());
     }
 
-    public void assertProduced(final List<Document> docs, final MongoCollection<?> coll) {
+    public void assertProduced(final List<ChangeStreamOperation> operationTypes, final MongoCollection<?> coll) {
+        assertProduced(operationTypes, coll.getNamespace().getFullName());
+    }
+
+    public void assertProduced(final List<ChangeStreamOperation> operationTypes, final String topicName) {
+        List<ChangeStreamOperation> produced = getProduced(operationTypes.size(), topicName).stream()
+                .map((b)-> createChangeStreamOperation(b.toString())).collect(Collectors.toList());
+        assertIterableEquals(operationTypes, produced);
+    }
+
+    public void assertProducedDocs(final List<Document> docs, final MongoCollection<?> coll) {
         assertEquals(docs, getProduced(docs.size(), coll.getNamespace().getFullName()).stream()
                 .map((b)-> Document.parse(b.toString())).collect(Collectors.toList()));
     }
@@ -114,8 +127,8 @@ public class MongoKafkaTestCase {
             consumer.subscribe(singletonList(topicName));
             List<Bytes> data = new ArrayList<>();
             int retryCount = 0;
-            while (data.size() < expectedCount && retryCount < 5) {
-                consumer.poll(Duration.ofSeconds(10)).records(topicName).forEach((r) -> data.add((Bytes) r.value()));
+            while (data.size() < expectedCount && retryCount < 30) {
+                consumer.poll(Duration.ofSeconds(2)).records(topicName).forEach((r) -> data.add((Bytes) r.value()));
                 retryCount++;
                 LOGGER.info("Polling {} ({}) seen: #{}", topicName, retryCount, data.size());
             }
@@ -136,13 +149,14 @@ public class MongoKafkaTestCase {
         return new KafkaConsumer<>(props);
     }
 
-    public void addSinkConnector() {
-        addSinkConnector(new Properties());
+    public void addSinkConnector(final String topicName) {
+        Properties props = new Properties();
+        props.put("topics", topicName);
+        addSinkConnector(props);
     }
 
     public void addSinkConnector(final Properties overrides) {
         Properties props = new Properties();
-        props.put("topics", getTopicName());
         props.put("connector.class", MongoSinkConnector.class.getName());
         props.put(MongoSinkConfig.CONNECTION_URI_CONFIG, MONGODB.getConnectionString().toString());
         props.put(MongoSinkTopicConfig.DATABASE_CONFIG, MONGODB.getDatabaseName());
@@ -169,6 +183,25 @@ public class MongoKafkaTestCase {
         overrides.forEach(props::put);
         KAFKA.addSourceConnector(props);
         sleep(10000);
+    }
+
+    public void restartSinkConnector(final String topicName) {
+        Properties props = new Properties();
+        props.put("topics", topicName);
+        restartSinkConnector(props);
+    }
+
+    public void restartSinkConnector(final Properties overrides) {
+        KAFKA.deleteSinkConnector();
+        sleep(5000);
+        addSinkConnector(overrides);
+    }
+
+    public void restartSourceConnector(final Properties overrides) {
+        KAFKA.deleteSourceConnector();
+        sleep(5000);
+        addSourceConnector(overrides);
+        sleep(500);
     }
 
 }

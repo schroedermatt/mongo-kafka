@@ -18,15 +18,19 @@
 
 package com.mongodb.kafka.connect.sink;
 
+import static com.mongodb.kafka.connect.sink.MongoSinkTopicConfig.TOPIC_OVERRIDE_PREFIX;
 import static com.mongodb.kafka.connect.util.Validators.errorCheckingValueValidator;
 import static java.lang.String.format;
+import static java.util.Collections.emptyList;
 import static java.util.Collections.unmodifiableList;
 import static java.util.Collections.unmodifiableMap;
-import static org.apache.kafka.common.config.ConfigDef.NO_DEFAULT_VALUE;
 import static org.apache.kafka.common.config.ConfigDef.Width;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import org.apache.kafka.common.config.AbstractConfig;
@@ -47,8 +51,17 @@ public class MongoSinkConfig extends AbstractConfig {
     public static final String DEFAULT_TOPIC = "mongo.sink.default.config";
 
     public static final String TOPICS_CONFIG = MongoSinkConnector.TOPICS_CONFIG;
+    private static final String TOPICS_DOC = "A list of kafka topics for the sink connector, separated by commas";
+    public static final String TOPICS_DEFAULT = "";
     private static final String TOPICS_DISPLAY = "The Kafka topics";
-    private static final String TOPICS_DOC = "A list of kafka topics for the sink connector.";
+
+    public static final String TOPICS_REGEX_CONFIG = "topics.regex";
+    private static final String TOPICS_REGEX_DOC = "Regular expression giving topics to consume. "
+            + "Under the hood, the regex is compiled to a <code>java.util.regex.Pattern</code>. "
+            + "Only one of " + TOPICS_CONFIG + " or " + TOPICS_REGEX_CONFIG + " should be specified.";
+    public static final String TOPICS_REGEX_DEFAULT = "";
+    private static final String TOPICS_REGEX_DISPLAY = "Topics regex";
+
 
     public static final String CONNECTION_URI_CONFIG = "connection.uri";
     private static final String CONNECTION_URI_DEFAULT = "mongodb://localhost:27017";
@@ -65,21 +78,44 @@ public class MongoSinkConfig extends AbstractConfig {
             + "Note: All configuration options apart from '" + CONNECTION_URI_CONFIG + "' and '" + TOPICS_CONFIG + "' are overridable.";
 
     private Map<String, String> originals;
-    private final List<String> topics;
+    private final Optional<List<String>> topics;
+    private final Optional<Pattern> topicsRegex;
     private final MongoSinkTopicConfig defaultConfig;
     private Map<String, MongoSinkTopicConfig> topicSinkConnectorConfigMap;
     private ConnectionString connectionString;
 
-    MongoSinkConfig(final Map<String, String> originals) {
-        super(CONFIG, originals);
+    public MongoSinkConfig(final Map<String, String> originals) {
+        super(CONFIG, originals, false);
         this.originals = unmodifiableMap(originals);
-        topics = unmodifiableList(getList(TOPICS_CONFIG));
+
+        topics = getList(TOPICS_CONFIG).isEmpty() ? Optional.empty() : Optional.of(unmodifiableList(getList(TOPICS_CONFIG)));
+        topicsRegex = getString(TOPICS_REGEX_CONFIG).isEmpty() ? Optional.empty()
+                : Optional.of(Pattern.compile(getString(TOPICS_REGEX_CONFIG)));
+
+        if (topics.isPresent() && topicsRegex.isPresent()) {
+            throw new ConfigException(format("%s and %s are mutually exclusive options, but both are set.", TOPICS_CONFIG,
+                    TOPICS_REGEX_CONFIG));
+        } else if (!topics.isPresent() && !topicsRegex.isPresent()) {
+            throw new ConfigException(format("Must configure one of %s or %s", TOPICS_CONFIG, TOPICS_REGEX_CONFIG));
+        }
+
         connectionString = new ConnectionString(getString(CONNECTION_URI_CONFIG));
+        topicSinkConnectorConfigMap = new ConcurrentHashMap<>(topics.orElse(emptyList()).stream()
+                .collect(Collectors.toMap((t) -> t, (t) -> new MongoSinkTopicConfig(t, originals))));
+
+        // Process and validate overrides of regex values.
+        if (topicsRegex.isPresent()) {
+            originals.keySet().stream().filter(k -> k.startsWith(TOPIC_OVERRIDE_PREFIX)).forEach(k -> {
+                String topic = k.substring(TOPIC_OVERRIDE_PREFIX.length()).split("\\.")[0];
+                if (!topicSinkConnectorConfigMap.containsKey(topic)) {
+                    topicSinkConnectorConfigMap.put(topic, new MongoSinkTopicConfig(topic, originals));
+                }
+            });
+        }
 
         // eager load all topic configs
         createMongoSinkTopicConfig();
 
-        // load a default config set
         defaultConfig = new MongoSinkTopicConfig(DEFAULT_TOPIC, originals);
     }
 
@@ -96,17 +132,29 @@ public class MongoSinkConfig extends AbstractConfig {
         return connectionString;
     }
 
-    List<String> getTopics() {
+    public Optional<List<String>> getTopics() {
         return topics;
     }
 
+    public Optional<Pattern> getTopicRegex() {
+        return topicsRegex;
+    }
+
     public MongoSinkTopicConfig getMongoSinkTopicConfig(final String topic) {
-        if (!topics.contains(topic)) {
-            throw new IllegalArgumentException(format("Unknown topic: %s, must be one of: %s", topic, topics));
-        }
-        if (topicSinkConnectorConfigMap == null) {
-            createMongoSinkTopicConfig();
-        }
+        topics.ifPresent(topicsList -> {
+            if (!topicsList.contains(topic)) {
+                throw new ConfigException(format("Unknown topic: %s, must be one of: %s", topic, topicsList));
+            }
+        });
+        topicsRegex.ifPresent(topicRegex -> {
+            if (!topicRegex.matcher(topic).matches()) {
+                throw new ConfigException(format("Unknown topic: %s, does not match: %s", topic, topicRegex));
+            }
+            if (!topicSinkConnectorConfigMap.containsKey(topic)) {
+                topicSinkConnectorConfigMap.put(topic, new MongoSinkTopicConfig(topic, originals));
+            }
+        });
+
         return topicSinkConnectorConfigMap.get(topic);
     }
 
@@ -119,7 +167,7 @@ public class MongoSinkConfig extends AbstractConfig {
     }
 
     private void createMongoSinkTopicConfig() {
-        topicSinkConnectorConfigMap = topics.stream()
+        topicSinkConnectorConfigMap = topics.orElse(emptyList()).stream()
                 .collect(Collectors.toMap((t) -> t, (t) -> new MongoSinkTopicConfig(t, originals)));
     }
 
@@ -135,9 +183,23 @@ public class MongoSinkConfig extends AbstractConfig {
                     return results;
                 }
 
-                // Validate any topic based configs
-                List<String> topics = (List<String>) results.get(TOPICS_CONFIG).value();
-                topics.forEach(topic -> results.putAll(MongoSinkTopicConfig.validateAll(topic, props)));
+                boolean hasTopicsConfig = !props.getOrDefault(TOPICS_CONFIG, "").trim().isEmpty();
+                boolean hasTopicsRegexConfig = !props.getOrDefault(TOPICS_REGEX_CONFIG, "").trim().isEmpty();
+
+                if (hasTopicsConfig && hasTopicsRegexConfig) {
+                    results.get(TOPICS_CONFIG).addErrorMessage(
+                            format("%s and %s are mutually exclusive options, but both are set.", TOPICS_CONFIG, TOPICS_REGEX_CONFIG));
+                } else if (!hasTopicsConfig && !hasTopicsRegexConfig) {
+                    results.get(TOPICS_CONFIG).addErrorMessage(
+                            format("Must configure one of %s or %s", TOPICS_CONFIG, TOPICS_REGEX_CONFIG));
+                }
+
+                if (hasTopicsConfig) {
+                    List<String> topics = (List<String>) results.get(TOPICS_CONFIG).value();
+                    topics.forEach(topic -> results.putAll(MongoSinkTopicConfig.validateAll(topic, props)));
+                } else if (hasTopicsRegexConfig) {
+                    results.putAll(MongoSinkTopicConfig.validateRegexAll(props));
+                }
                 return results;
             }
         };
@@ -145,14 +207,25 @@ public class MongoSinkConfig extends AbstractConfig {
         int orderInGroup = 0;
         configDef.define(TOPICS_CONFIG,
                 Type.LIST,
-                NO_DEFAULT_VALUE,
-                Validators.nonEmptyList(),
+                TOPICS_DEFAULT,
                 Importance.HIGH,
                 TOPICS_DOC,
                 group,
                 ++orderInGroup,
                 Width.MEDIUM,
                 TOPICS_DISPLAY);
+
+        configDef.define(TOPICS_REGEX_CONFIG,
+                Type.STRING,
+                TOPICS_REGEX_DEFAULT,
+                Validators.isAValidRegex(),
+                Importance.HIGH,
+                TOPICS_REGEX_DOC,
+                group,
+                ++orderInGroup,
+                Width.MEDIUM,
+                TOPICS_REGEX_DISPLAY);
+
         configDef.define(CONNECTION_URI_CONFIG,
                 Type.STRING,
                 CONNECTION_URI_DEFAULT,

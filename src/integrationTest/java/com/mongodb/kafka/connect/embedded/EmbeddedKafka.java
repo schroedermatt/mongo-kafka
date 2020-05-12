@@ -225,7 +225,7 @@ public class EmbeddedKafka implements BeforeAllCallback, AfterEachCallback, Afte
         workerProps.put("key.converter.schemas.enable", "false");
         workerProps.put(DistributedConfig.VALUE_CONVERTER_CLASS_CONFIG, "org.apache.kafka.connect.storage.StringConverter");
         workerProps.put("value.converter.schemas.enable", "false");
-        workerProps.put(DistributedConfig.OFFSET_COMMIT_INTERVAL_MS_CONFIG, "30000");
+        workerProps.put(DistributedConfig.OFFSET_COMMIT_INTERVAL_MS_CONFIG, "100");
         workerProps.put(StandaloneConfig.OFFSET_STORAGE_FILE_FILENAME_CONFIG, createTempDirectory().getAbsolutePath() + "connect");
 
         return workerProps;
@@ -238,9 +238,9 @@ public class EmbeddedKafka implements BeforeAllCallback, AfterEachCallback, Afte
 
     @Override
     public void afterEach(final ExtensionContext context) throws InterruptedException {
-        deleteTopicsAndWait(Duration.ofMinutes(2));
         deleteSinkConnector();
         deleteSourceConnector();
+        deleteTopicsAndWait(Duration.ofMinutes(4));
     }
 
     @Override

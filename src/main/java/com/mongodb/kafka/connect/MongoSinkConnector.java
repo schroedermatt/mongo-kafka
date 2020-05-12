@@ -18,18 +18,26 @@
 
 package com.mongodb.kafka.connect;
 
-import java.util.ArrayList;
+import static com.mongodb.kafka.connect.util.ConnectionValidator.getConfigByName;
+import static com.mongodb.kafka.connect.util.ConnectionValidator.validateCanConnect;
+import static com.mongodb.kafka.connect.util.ConnectionValidator.validateUserHasActions;
+import static java.util.Arrays.asList;
+import static java.util.Collections.singletonList;
+
 import java.util.List;
 import java.util.Map;
 
+import org.apache.kafka.common.config.Config;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.connect.connector.Task;
 import org.apache.kafka.connect.sink.SinkConnector;
 
 import com.mongodb.kafka.connect.sink.MongoSinkConfig;
 import com.mongodb.kafka.connect.sink.MongoSinkTask;
+import com.mongodb.kafka.connect.sink.MongoSinkTopicConfig;
 
 public class MongoSinkConnector extends SinkConnector {
+    private static final List<String> REQUIRED_SINK_ACTIONS = asList("insert", "update", "remove");
     private Map<String, String> settings;
 
     @Override
@@ -49,11 +57,7 @@ public class MongoSinkConnector extends SinkConnector {
 
     @Override
     public List<Map<String, String>> taskConfigs(final int maxTasks) {
-        List<Map<String, String>> taskConfigs = new ArrayList<>(maxTasks);
-        for (int i = 0; i < maxTasks; i++) {
-            taskConfigs.add(settings);
-        }
-        return taskConfigs;
+        return singletonList(settings);
     }
 
     @Override
@@ -63,5 +67,47 @@ public class MongoSinkConnector extends SinkConnector {
     @Override
     public ConfigDef config() {
         return MongoSinkConfig.CONFIG;
+    }
+
+    @Override
+    public Config validate(final Map<String, String> connectorConfigs) {
+        Config config = super.validate(connectorConfigs);
+
+        MongoSinkConfig sinkConfig;
+        try {
+            sinkConfig = new MongoSinkConfig(connectorConfigs);
+        } catch (Exception e) {
+            return config;
+        }
+
+        validateCanConnect(config, MongoSinkConfig.CONNECTION_URI_CONFIG)
+                .ifPresent(client -> {
+                    try {
+                        sinkConfig.getTopics().ifPresent(topics -> topics.forEach(topic -> {
+                            MongoSinkTopicConfig mongoSinkTopicConfig = sinkConfig.getMongoSinkTopicConfig(topic);
+                            validateUserHasActions(client,
+                                    sinkConfig.getConnectionString().getCredential(),
+                                    REQUIRED_SINK_ACTIONS,
+                                    mongoSinkTopicConfig.getString(MongoSinkTopicConfig.DATABASE_CONFIG),
+                                    mongoSinkTopicConfig.getString(MongoSinkTopicConfig.COLLECTION_CONFIG),
+                                    MongoSinkConfig.CONNECTION_URI_CONFIG, config);
+
+                        }));
+                        sinkConfig.getTopicRegex().ifPresent(regex -> {
+                            validateUserHasActions(client,
+                                    sinkConfig.getConnectionString().getCredential(),
+                                    REQUIRED_SINK_ACTIONS,
+                                    getConfigByName(config, MongoSinkTopicConfig.DATABASE_CONFIG).map(c -> (String) c.value()).orElse(""),
+                                    getConfigByName(config, MongoSinkTopicConfig.COLLECTION_CONFIG).map(c -> (String) c.value()).orElse(""),
+                                    MongoSinkConfig.CONNECTION_URI_CONFIG, config);
+                        });
+                    } catch (Exception e) {
+                        // Ignore
+                    } finally {
+                        client.close();
+                    }
+                });
+
+        return config;
     }
 }
